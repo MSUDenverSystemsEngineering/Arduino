@@ -70,13 +70,13 @@ Try {
     ##*===============================================
     ## Variables: Application
     [string]$appVendor = ''
-    [string]$appName = 'Arduino IDE'
-    [string]$appVersion = '2.1.0'
+    [string]$appName = 'Arduino'
+    [string]$appVersion = '1.8.18'
     [string]$appArch = 'x64'
     [string]$appLang = 'EN'
     [string]$appRevision = '01'
     [string]$appScriptVersion = '1.0.0'
-    [string]$appScriptDate = '05/23/2023'
+    [string]$appScriptDate = '05/24/2023'
     [string]$appScriptAuthor = 'Sebastian Bickford'
     ##*===============================================
     ## Variables: Install Titles (Only set here to override defaults set by the toolkit)
@@ -144,16 +144,12 @@ Try {
         [String]$installPhase = 'Pre-Installation'
 
         ## Show Welcome Message, close Internet Explorer if required, allow up to 3 deferrals, verify there is enough disk space to complete the install, and persist the prompt
-        Show-InstallationWelcome -CloseApps 'processName' -CheckDiskSpace -PersistPrompt
+        Show-InstallationWelcome -CloseApps 'arduino,arduino_debug,arduino-builder,javaw' -CheckDiskSpace -PersistPrompt
 
         ## Show Progress Message (with the default message)
         Show-InstallationProgress
 
         ## <Perform Pre-Installation tasks here>
-        ## This will create the folder that Arduino will globally install to, and move over the config file and drivers that Arduino needs to not prompt for admin access to install upon opening.
-        New-Item -ItemType Directory -Path C:\arduino-ide\appdata\local
-        Copy-File -Path "$dirSupportFiles\arduino-cli.yaml" -Destination "C:\arduino-ide"
-        Copy-Item -Path "$dirSupportFiles\Arduino15\" -Destination "C:\arduino-ide\appdata\local" -Recurse
 
         ##*===============================================
         ##* INSTALLATION
@@ -171,8 +167,34 @@ Try {
         }
 
         ## <Perform Installation tasks here>
-        $exitCode = Execute-Process -Path "MsiExec.exe" -Parameters "/i $dirFiles\arduino-ide_2.1.0_Windows_64bit.msi ALLUSERS=1 APPLICATIONFOLDER=`"C:\arduino-ide`" /qn" -WindowStyle "Hidden" -PassThru
-		If (($exitCode.ExitCode -ne "0") -and ($mainExitCode -ne "3010")) { $mainExitCode = $exitCode.ExitCode }
+        ## Install Adafruit Industries Certificate
+        $Cert1 = Get-ChildItem -Path "$dirSupportFiles" -Include AdafruitCircuitPlayground.cer -File -Recurse -ErrorAction SilentlyContinue
+        If($Cert1.Exists)
+        {
+        Execute-Process -Path "$envSystem32Directory\certutil.exe" -Parameters "-addstore ""TrustedPublisher"" ""$Cert1""" -WindowStyle Hidden
+        Start-Sleep -Seconds 5
+        }
+        ## Install Arduino LLC Certificate
+        $Cert2 = Get-ChildItem -Path "$dirSupportFiles" -Include arduino.cer -File -Recurse -ErrorAction SilentlyContinue
+        If($Cert2.Exists)
+        {
+        Execute-Process -Path "$envSystem32Directory\certutil.exe" -Parameters "-addstore ""TrustedPublisher"" ""$Cert2""" -WindowStyle Hidden
+        Start-Sleep -Seconds 5
+        }
+        ## Install Arduino srl Certificate
+        $Cert3 = Get-ChildItem -Path "$dirSupportFiles" -Include linino-boards_amd64.cer -File -Recurse -ErrorAction SilentlyContinue
+        If($Cert3.Exists)
+        {
+        Execute-Process -Path "$envSystem32Directory\certutil.exe" -Parameters "-addstore ""TrustedPublisher"" ""$Cert3""" -WindowStyle Hidden
+        Start-Sleep -Seconds 5
+        }
+        ## Install Arduino IDE
+        $ExePath = Get-ChildItem -Path "$dirFiles" -Include arduino*windows.exe -File -Recurse -ErrorAction SilentlyContinue
+        If($ExePath.Exists)
+        {
+        Execute-Process -Path "$ExePath" -Parameters "/S" -WindowStyle Hidden
+        Start-Sleep -Seconds 5
+        }
 
         ##*===============================================
         ##* POST-INSTALLATION
@@ -180,6 +202,9 @@ Try {
         [String]$installPhase = 'Post-Installation'
 
         ## <Perform Post-Installation tasks here>
+        ##Add Firewall rule to allow ArduinoIDE
+        New-NetFirewallRule -DisplayName "Allow ArduinoIDE" -Direction Inbound -Program "C:\Program Files (x86)\Arduino\arduino.exe" -Action Allow
+        New-NetFirewallRule -DisplayName "Allow Javaw" -Direction Inbound -Program "C:\program files (x86)\arduino\java\bin\javaw.exe" -Action Allow
 
         ## Display a message at the end of the install
         ## See original PSADT Deploy-Application.ps1 file from GitHub if you want to use this feature
@@ -191,7 +216,7 @@ Try {
         [String]$installPhase = 'Pre-Uninstallation'
 
         ## Show Welcome Message, close Internet Explorer with a 60 second countdown before automatically closing
-        Show-InstallationWelcome -CloseApps 'processName' -CloseAppsCountdown 60
+        Show-InstallationWelcome -CloseApps 'arduino,arduino_debug,arduino-builder,javaw' -CloseAppsCountdown 60
 
         ## Show Progress Message (with the default message)
         Show-InstallationProgress
@@ -213,8 +238,20 @@ Try {
         }
 
         ## <Perform Uninstallation tasks here>
-        $exitCode = Execute-Process -Path "MsiExec.exe" -Parameters "/x $dirFiles\arduino-ide_2.1.0_Windows_64bit.msi /qn" -WindowStyle "Hidden" -PassThru
-		If (($exitCode.ExitCode -ne "0") -and ($mainExitCode -ne "3010")) { $mainExitCode = $exitCode.ExitCode }
+        $AppList = Get-InstalledApplication -Name 'Arduino'
+        ForEach ($App in $AppList)
+        {
+        If($App.UninstallString)
+        {
+        $UninstPath = $App.UninstallString -replace '"', ''
+        If(Test-Path -Path $UninstPath)
+        {
+        Write-log -Message "Found $($App.DisplayName) ($($App.DisplayVersion)) and a valid uninstall string, now attempting to uninstall."
+        Execute-Process -Path $UninstPath -Parameters '/S'
+        Start-Sleep -Seconds 5
+        }
+        }
+        }
 
         ##*===============================================
         ##* POST-UNINSTALLATION
@@ -281,8 +318,8 @@ Catch {
 # SIG # Begin signature block
 # MIImVAYJKoZIhvcNAQcCoIImRTCCJkECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC615wfpIOJbZRT
-# vt6dm8Un50muXreVmxvLib5aGdFmJKCCH8AwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHTHWY7H3545/P
+# AO2fiqiuub1sh04qNxFPrAprPt5EIaCCH8AwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -456,32 +493,32 @@ Catch {
 # MSswKQYDVQQDEyJTZWN0aWdvIFB1YmxpYyBDb2RlIFNpZ25pbmcgQ0EgUjM2AhEA
 # pU3fcPvc8UxUgrjysXLKMTANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEM
 # MQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQB
-# gjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB/VmD3mJ/i58gu
-# sHm4+W6ILUdXeavzs0eQl/9Yb/LJVTANBgkqhkiG9w0BAQEFAASCAYBf17dxinYf
-# lZwikvj5sPYBbZcoHZoUd1qXtdmsBXEGHZG15MofnjehQuLnTMfvtW51TWlivOkk
-# yHRzPfl4SWwY0SZIQOhIhwN1vXAD0l+zCCd0L1Sl6rKr4J80TZ1wITNEm454wjiv
-# zpqhoaxZyIDOdKP+NCw4yerZywNzYGbwL1khaof4CBwu14adnGRDHiHlMTsC994k
-# 8oHO+e8a5AvR7uLBmYpPqO1u0yW8I5tSTR2TF4ikrOvu/D3J20CJBuqhYWKsUfGc
-# AvEoRZT7dUQhsEmNcA5JwRizf++zKtqkZoLOKMAk9dauiCvUjsaXutKWa2k+23MW
-# JH1ChI05jXT0BMfX/Sg05nE/uQJAJ4yF9eF8+Z4c4cVjv5o51R0rrllW7SBVqljn
-# /1lTE9TqMwJF9rIKnqt0ZussEwLDpgpqMYgrkWUmJvUYAh1URICAHo9DH8jI18QB
-# wASnvIB/dZNcQCGpkxFMGGyAXHmSPucr84ykgqmwHMibW28t2Djh8Y6hggNLMIID
+# gjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBZpJDkcl7q7h1b
+# +MGdWdvvlriXHhDFeuvDs3BSCyaI5zANBgkqhkiG9w0BAQEFAASCAYBkMWWzY9xY
+# K6a0gXJiiAoHmjQyMw4QIcLpO/dCREayccBrBALc6CbceRmOi5AH2X+IDQZiC9h8
+# oIuNmYYi7RDSLzVDe3ds6ALWncSMDt4tpJjAIz2sgOT+zvJpROQX4o4HTUF5eb74
+# OZq9Ji3K+A6lFxZxxN9JeOpFFBmfVSUvkTGuMNf27i0rXMvlkC8vAQP9PDMIWj0V
+# 25FTjnQAEYBI3/HOoA7JN9u+0ZQy9OFignfVxv5+klZhGtVL5d+CRyyOjmoDanVe
+# 7qd7JtduvE9k9oYONfILUpGSpcMNZcOntEhIfPWg7NgktRZByYlxv5rtp8E9Laqp
+# bznKineup8giCRYCnJzoMAGf+SXZLm6fxwQdyn+K6aCitnFTTxQc5WFBU5mlVtUW
+# JOHsqw1lCe3cInHx9FK5pwi34NqZN/C9z4wgfhn0dXsyBQDzvqm9piFA2eAYLBim
+# kFEXUe6W0/MFKWUHNuGiT3jwcmXQUAHvq5nqbzKzlJApzJTdS3o6bVyhggNLMIID
 # RwYJKoZIhvcNAQkGMYIDODCCAzQCAQEwgZEwfTELMAkGA1UEBhMCR0IxGzAZBgNV
 # BAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2FsZm9yZDEYMBYGA1UE
 # ChMPU2VjdGlnbyBMaW1pdGVkMSUwIwYDVQQDExxTZWN0aWdvIFJTQSBUaW1lIFN0
 # YW1waW5nIENBAhA5TCXhfKBtJ6hl4jvZHSLUMA0GCWCGSAFlAwQCAgUAoHkwGAYJ
-# KoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjMwNTIzMjEw
-# NzAzWjA/BgkqhkiG9w0BCQQxMgQwzvlkwg+8HJYDhPuUCgUFNOHI9EO4HDeSUIFO
-# UOXIuKCDTc6d4Q+eEgodTrPveJeYMA0GCSqGSIb3DQEBAQUABIICAJEnj/LPeBK+
-# araDZr6F45gIUPMmr2zRrZeScGYba6H5X0J5FBWF9/EKdO8u4BfEvU9iENFYU6LY
-# 5dE2KcAoRh4HDgtuMz3BO01EfrGxVo/mPzB/EXjgEmj01vXRoayiDUxPauwnK68Z
-# HSLTdUPTgFTpGKBKIMINb8xSicmV9l6HKYu60k/FFwuuefNTwjMYgvey893S3bny
-# Nf7Jt/bAsQq+AXSEng9HfTXsW6kMmWElZynPGZ5isig6fbCMnB7dEUKuaqo/cd4q
-# vandzWqOhVnn4Q5VOO45LwQjdzdwy/2oIn6odnDZBtWd5PKIBYFle34BhCxIe47p
-# wHzuZapz1rxmdtaTgQ1f2IB6PryOQ8bfvXKAWlWv6TnKBT2ePYJGtiblf/pYUsW0
-# QeAruFBImRHSqbcLvTARoKm4Wu54snK7TI9prgvQ6zg2Fo06XXKD5Evj4hePtlfp
-# 2AxwuZCWTldvWovz+OCdxBRvboVt3/arvtNEVhyZ3cNbH/NzPK5EQkj4LSFU9Uy5
-# GPvF3lKL/7NJX4ChH2hyg8EtRCRQmIPFE7X8Nj8m9rzwnExmKmLgVlTmDoChktj6
-# 2aw2lWKMndJJNZJQ5wPqbx+Du/wZNi4Uvxk+I+skM7sqgEpFxfDWbQuHUslpGGmB
-# NSBorXDD6p+3ALHMcWS3QA2ykLQAnFjk
+# KoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjMwNTI0MTkw
+# NTI4WjA/BgkqhkiG9w0BCQQxMgQwGh8ErFbhATxzECTquA/m48uj5CfCqMQq+uMV
+# BlvAo6WRmWbbMOo/f6JrpbVf5NXZMA0GCSqGSIb3DQEBAQUABIICAA/nYRYQJwAc
+# w4ddbly04QEt/mvje5X4cFuTPQJJkQ937fOgjUF5W94QV2CEIZVQAtnapxnf05k/
+# UblJXZpzTN2Itak9idaZTmssj/Fa3W+XrnOzzxuI3W84sZCEgkzJMozIcXPIiJQo
+# Q6zXoEUY3PVAV6u2W/mbL9u72GmeYtXixK6aVkh3EOcAGjwzBABAkg3rhxEoSH7e
+# iKfpYRdw7tvv3I17ff2DSRhnXMK6QqdlWDvcm3kBKVvtvJ3JwKvZHJy4bmzyvonr
+# l5easB40GOMenrW4rHOc5230LULnY2JAOQYbcoTEIf3YVUY3BcxA3ny/rfwIIWm5
+# fBcBnuZtCYNpCvgFG73ZZfQEgRzzIxPuwTP3IHpUPcQXjDffWfrG/P9q3I55dOPj
+# D1PBwnJx3NkfBX+BptGBNxa2aeBxjywBbkNp7NjAwvd3Da55H6wQcGy5t8rc3R+Q
+# vUzUIVFimvFYoOW/oY/MGWRYPVNE2J1Y18W+Elv6ffRGdUzRgCgMDdajilLG3+qc
+# 9IMjhOooxyVVB7I9PU5saGCRWzSk8nc+xOoYuvl7HBsg8RB16gT1w6S+C8iBJYUE
+# QNBjVe1RWuQiunRIpsUYn7we40rRDFhMpsVxq+Eynvt4JgfaSHWm/aosqnMl0yEs
+# z5AuOYvcDQOKPwLzTX60aicEjnkIdXZg
 # SIG # End signature block
